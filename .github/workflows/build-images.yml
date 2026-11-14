@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       only:
-        description: "Build only this image name from images.json (empty: all)"
+        description: "Build only this image name from images.json, even if its PR is merged (empty: all not merged)"
         required: false
         default: ""
       pycti_version:
@@ -35,11 +35,17 @@ jobs:
     outputs:
       images: ${{ steps.select.outputs.images }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Fetch images.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/contents/images.json?ref=${GITHUB_SHA}" \
+            -H "Accept: application/vnd.github.raw" > images.json
 
       # Images whose upstream pull request is merged are not built any more: the
       # official image takes over, and the cleanup workflow deletes them later. The
-      # entry stays in images.json; a new pr number builds it again.
+      # entry stays in images.json; a new pr number builds it again, and naming it
+      # in 'only' builds it once anyway.
       - name: Select images
         id: select
         env:
@@ -58,8 +64,10 @@ jobs:
             pr=$(jq -r '.pr // empty' <<< "$entry")
             if [ -n "$pr" ]; then
               merged=$(gh api "repos/${UPSTREAM_REPOSITORY}/pulls/${pr}" --jq '.merged_at // empty')
-              if [ -n "$merged" ]; then
-                echo "::notice::${name}: PR #${pr} merged on ${merged%T*}, not built. Set its pr to a new pull request to build it again."
+              if [ -n "$merged" ] && [ -n "$ONLY" ]; then
+                echo "::notice::${name}: PR #${pr} merged on ${merged%T*}, built anyway as it was named in 'only'"
+              elif [ -n "$merged" ]; then
+                echo "::notice::${name}: PR #${pr} merged on ${merged%T*}, not built. Name it in 'only' or set its pr to a new pull request to build it again."
                 continue
               fi
             fi
@@ -81,11 +89,14 @@ jobs:
         include: ${{ fromJson(needs.matrix.outputs.images) }}
     steps:
       - name: Check out ${{ matrix.branch }}
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ${{ env.SOURCE_REPOSITORY }}
-          ref: ${{ matrix.branch }}
-          sparse-checkout: ${{ matrix.path }}
+        env:
+          BRANCH: ${{ matrix.branch }}
+          CONNECTOR_PATH: ${{ matrix.path }}
+        run: |
+          git clone --quiet --depth 1 --filter=blob:none --sparse --branch "$BRANCH" \
+            "https://github.com/${SOURCE_REPOSITORY}.git" .
+          git sparse-checkout set "$CONNECTOR_PATH"
+          git log -1 --format="%h %s"
 
       # The branches install connectors-sdk from upstream master, which pins an exact
       # pycti version: an older pin on the branch cannot be installed alongside it.
@@ -152,13 +163,10 @@ jobs:
           echo "revision=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "Tags: $tags"
 
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Log in to ghcr.io
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
 
       - name: Build and push
         working-directory: ${{ matrix.path }}

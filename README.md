@@ -71,6 +71,8 @@ a branch, run the workflow by hand:
 2. Click **Run workflow**.
 3. Fill in:
    - `only`: one image name from `images.json`, such as `threatfox`, or empty for all.
+     A named image is built even if its pull request is merged (see
+     [When a pull request is merged](#when-a-pull-request-is-merged)).
    - `pycti_version`: empty for the default build, or a version (see below).
 4. Click **Run workflow** to start it.
 
@@ -139,10 +141,20 @@ each entry upstream:
 - **The entry stays in `images.json`.** Leave it there: it is skipped, so changing
   `images.json` to add another image does not rebuild it.
 
-To ship a fix on top of the merged code, open a new upstream pull request, then set
-the entry's `pr` to the new number (and `branch` if it changed). The image builds
-again, under a new `pr-<number>` tag, and its package is recreated if the cleanup had
-deleted it. That merge retires it again the same way.
+To ship a fix on top of the merged code:
+
+- **Before a new pull request:** push the fix to the branch, then run the build by
+  hand with the image name in `only`. Naming an image builds it even when its pull
+  request is merged; it updates the branch and `sha-` tags (and the old `pr-` tag).
+  Running the build for all images still skips it. The cleanup keeps retiring it 30
+  days after the old merge, so set `pr` to the new pull request once it is open.
+- **With a new pull request:** set the entry's `pr` to the new number (and `branch` if
+  it changed). The image builds again, under a new `pr-<number>` tag, and its package
+  is recreated if the cleanup had deleted it. That merge retires it again the same
+  way.
+
+An image that never had a pull request (no `pr`) always builds: nothing is checked
+upstream.
 
 An entry without `pr` is never retired automatically: remove it from `images.json`
 and delete its package by hand from the package settings.
