@@ -25,7 +25,8 @@ on:
     paths: [.github/workflows/cleanup-images.yml]
 
 env:
-  KEEP_BUILDS: 5
+  # Private images count against the 500 MB of the free plan.
+  KEEP_BUILDS: 2
   RETIRE_DAYS: 30
   UPSTREAM_REPOSITORY: OpenCTI-Platform/connectors
 
@@ -97,7 +98,8 @@ jobs:
             kept=$(jq -c --argjson current "$current" --argjson n "$KEEP_BUILDS" '$current + .[:$n]' <<< "$builds")
 
             # Manifests referenced by the kept versions.
-            token=$(curl -fsS "https://ghcr.io/token?scope=repository:${owner}/${package}:pull" | jq -r .token)
+            # Authenticated, so private images work too.
+            token=$(curl -fsS -u "${GITHUB_ACTOR}:${GH_TOKEN}" "https://ghcr.io/token?scope=repository:${owner}/${package}:pull" | jq -r .token)
             protected=$(jq -r '.[].name' <<< "$kept")
             for digest in $(jq -r '.[].name' <<< "$kept"); do
               children=$(curl -fsS -H "Authorization: Bearer ${token}" -H "Accept: ${accept}" \

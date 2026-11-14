@@ -16,6 +16,17 @@ docker pull ghcr.io/fiying-scotsman/connector-censys-enrichment:pr-7402
 docker pull ghcr.io/fiying-scotsman/connector-google-ti-feeds:google-ti-feeds-enhanced-features
 ```
 
+Public images pull without logging in. A private image needs read access to its
+package (package settings > Manage access) and a login with a classic personal access
+token that has the `read:packages` scope:
+
+```bash
+echo "<token>" | docker login ghcr.io --username <github-user> --password-stdin
+```
+
+An image built while this repository is private starts private. A public image can
+never be made private again: to hide one, delete its package and rebuild it.
+
 | Connector | Branch | Upstream PR | Tags |
 |---|---|---|---|
 | threatfox | `ThreatFox-Expanded` | [#7404](https://github.com/OpenCTI-Platform/connectors/pull/7404) | [list](https://github.com/FIying-Scotsman/connector-images/pkgs/container/connector-threatfox/versions) |
@@ -113,13 +124,14 @@ each image in `images.json`, keeps:
 
 - the current builds: every version a `pr-` or branch tag points to, including
   `-pycti-<version>` builds of a specific OpenCTI version;
-- the 5 newest older builds (versions only tagged `sha-...`), for rollback. Change
-  `KEEP_BUILDS` in the workflow to keep more or fewer;
+- the 2 newest older builds (versions only tagged `sha-...`), for rollback. Change
+  `KEEP_BUILDS` in the workflow to keep more or fewer: private images count against
+  the 500 MB of storage of the free plan, public ones are free;
 - the manifests those versions reference. GitHub lists them as untagged versions, but
   the tagged image breaks without them.
 
 Everything else, including untagged versions, is deleted. A deployment pinned to a
-`sha-` tag older than the 5 newest builds stops pulling, so hand over a newer build
+`sha-` tag older than the 2 newest builds stops pulling, so hand over a newer build
 before it falls out.
 
 To preview, run the workflow by hand with `dry_run` ticked (the default): the run
