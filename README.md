@@ -24,18 +24,19 @@ docker pull ghcr.io/fiying-scotsman/connector-google-ti-feeds:google-ti-feeds-en
 
 ### Tags
 
-Every build is pushed with these tags:
-
 | Tag | Example | Points to |
 |---|---|---|
-| `pr-<number>` | `pr-7404` | Latest build of the pull request. Only when the image has an upstream PR. |
-| `<branch>` (lower case) | `threatfox-expanded` | Latest build of the branch. Always present. |
-| `sha-<commit>` | `sha-5133767` | One exact build, never moves. Use it to pin a deployment. |
+| `pr-<number>` | `pr-7404` | Latest default build of the pull request. Only when the image has an upstream PR. |
+| `<branch>` (lower case) | `threatfox-expanded` | Latest default build of the branch. Always present. |
+| `sha-<commit>-pycti-<version>` | `sha-5133767-pycti-7.261109.0` | One exact build: that commit with that pycti version. Never moves. Use it to pin a deployment. |
 
-There is no `latest` tag. The `pr-` and branch tags move to each new build; a `sha-`
-tag stays on the build it was made for. The **list** links above show every tag of an
-image with its build date. From a terminal, `skopeo list-tags docker://<image>` or
-`crane ls <image>` lists them too.
+There is no `latest` tag. The `pr-` and branch tags move to each new default build. The
+**list** links above show every tag of an image with its build date. From a terminal,
+`skopeo list-tags docker://<image>` or `crane ls <image>` lists them too.
+
+Builds with a [specific pycti version](#building-for-a-specific-opencti-version) get
+their own tags with the version in them, such as `pr-7404-pycti-7.261023.1`, and leave
+the plain tags alone.
 
 Configuration is the same as the upstream connector: see the README of the connector
 on its branch.
@@ -63,11 +64,41 @@ Add an entry to `images.json`:
 
 ## Building
 
-`images.json` lists the images. Pushing a change to it builds every image. To rebuild
-after new commits on a branch, run **Actions > Build connector images > Run workflow**:
+Pushing a change to `images.json` builds every image. To rebuild after new commits on
+a branch, run the workflow by hand:
 
-- `only`: one image name, or empty for all
-- `pycti_version`: the pycti version matching the OpenCTI platform the image will
-  connect to, or empty to keep the branch pin
+1. Open [Actions > Build connector images](https://github.com/FIying-Scotsman/connector-images/actions/workflows/build-images.yml).
+2. Click **Run workflow**.
+3. Fill in:
+   - `only`: one image name from `images.json`, such as `threatfox`, or empty for all.
+   - `pycti_version`: empty for the default build, or a version (see below).
+4. Click **Run workflow** to start it.
 
 Images are built for `linux/amd64`.
+
+### pycti version
+
+The connector branches install `connectors-sdk` from upstream `master`, which pins one
+exact pycti version. A branch pinning another version cannot be installed with it, so
+the workflow replaces the branch pin:
+
+- **Default build** (`pycti_version` empty): uses the pycti version of `connectors-sdk`
+  on upstream `master`. When upstream bumps pycti, the next build follows, with nothing
+  to change here. These builds move the `pr-` and branch tags.
+- **Specific version** (`pycti_version` set): see below.
+
+### Building for a specific OpenCTI version
+
+pycti versions follow the OpenCTI releases. To build for a platform that is not on the
+latest release, enter its version as `pycti_version`, for example `7.261023.1`. The
+workflow then:
+
+- pins pycti to that version, and `connectors-sdk` to the upstream release tag of the
+  same name, whose own pycti pin matches. A version with no such tag stops the build
+  with an error: use an OpenCTI release version.
+- tags the image `pr-<number>-pycti-<version>`, `<branch>-pycti-<version>` and
+  `sha-<commit>-pycti-<version>`. The plain `pr-` and branch tags keep pointing at
+  the default build.
+
+A branch written against a newer `connectors-sdk` than that release may not build or
+run with it: check the connector on the target platform before handing it over.

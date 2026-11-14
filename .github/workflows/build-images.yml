@@ -3,8 +3,8 @@ name: Build connector images
 # Builds the connectors listed in images.json from their branches on the
 # connectors fork and pushes them to ghcr.io/<owner>/connector-<name>.
 #
-# Tags per image: the branch name, sha-<commit>, and pr-<number> when the
-# entry has an upstream pull request.
+# Tags per image: the branch name, pr-<number> when the entry has an upstream
+# pull request, and sha-<commit>-pycti-<version> for the exact build. See README.
 
 on:
   workflow_dispatch:
@@ -69,24 +69,41 @@ jobs:
 
       # The branches install connectors-sdk from upstream master, which pins an exact
       # pycti version: an older pin on the branch cannot be installed alongside it.
+      # A manual pycti version also pins connectors-sdk to the upstream release tag of
+      # that version, whose own pycti pin is the same.
       - name: Pin pycti
+        id: pycti
         working-directory: ${{ matrix.path }}
         env:
           PYCTI_VERSION: ${{ inputs.pycti_version }}
         run: |
-          if [ -z "$PYCTI_VERSION" ]; then
+          if [ -n "$PYCTI_VERSION" ]; then
+            if ! git ls-remote --exit-code --tags https://github.com/OpenCTI-Platform/connectors.git "refs/tags/${PYCTI_VERSION}" > /dev/null; then
+              echo "::error::No upstream release tag ${PYCTI_VERSION}: use an OpenCTI release version"
+              exit 1
+            fi
+            sdk="connectors-sdk @ git+https://github.com/OpenCTI-Platform/connectors.git@${PYCTI_VERSION}#subdirectory=connectors-sdk"
+            find . \( -name pyproject.toml -o -name requirements.txt \) \
+              -exec sed -i -E "s|connectors-sdk @ git\+https://github\.com/OpenCTI-Platform/connectors\.git@[^#]+#subdirectory=connectors-sdk|${sdk}|" {} +
+            echo "manual=true" >> "$GITHUB_OUTPUT"
+          else
             PYCTI_VERSION=$(curl -fsSL https://raw.githubusercontent.com/OpenCTI-Platform/connectors/master/connectors-sdk/pyproject.toml \
               | sed -nE 's/.*"pycti==([0-9.]+)".*/\1/p' | head -1)
+            if [ -z "$PYCTI_VERSION" ]; then
+              echo "::error::No pycti pin found in connectors-sdk master"
+              exit 1
+            fi
             echo "pycti pin of connectors-sdk master: ${PYCTI_VERSION}"
-          fi
-          if [ -z "$PYCTI_VERSION" ]; then
-            echo "::error::No pycti version to pin"
-            exit 1
+            echo "manual=false" >> "$GITHUB_OUTPUT"
           fi
           find . \( -name pyproject.toml -o -name requirements.txt \) \
             -exec sed -i -E "s/pycti==[0-9][0-9.]*/pycti==${PYCTI_VERSION}/" {} +
-          grep -rn "pycti==" --include=pyproject.toml --include=requirements.txt .
+          grep -rnE "pycti==|connectors-sdk @" --include=pyproject.toml --include=requirements.txt .
+          echo "version=${PYCTI_VERSION}" >> "$GITHUB_OUTPUT"
 
+      # Default builds move the branch and pr- tags. A manual pycti build only gets
+      # tags with the version in them, so the default tags never change underneath
+      # a deployment.
       - name: Compute tags
         id: tags
         env:
@@ -94,13 +111,23 @@ jobs:
           BRANCH: ${{ matrix.branch }}
           PR: ${{ matrix.pr }}
           OWNER: ${{ github.repository_owner }}
+          PYCTI: ${{ steps.pycti.outputs.version }}
+          MANUAL: ${{ steps.pycti.outputs.manual }}
         run: |
           image="ghcr.io/${OWNER,,}/connector-${NAME}"
           branch_tag=$(printf '%s' "${BRANCH,,}" | tr -c 'a-z0-9._-' '-')
-          tags="${image}:${branch_tag},${image}:sha-$(git rev-parse --short=7 HEAD)"
+          names=("$branch_tag")
           if [ -n "$PR" ]; then
-            tags="${tags},${image}:pr-${PR}"
+            names+=("pr-${PR}")
           fi
+          tags="${image}:sha-$(git rev-parse --short=7 HEAD)-pycti-${PYCTI}"
+          for tag_name in "${names[@]}"; do
+            if [ "$MANUAL" = "true" ]; then
+              tags="${tags},${image}:${tag_name}-pycti-${PYCTI}"
+            else
+              tags="${tags},${image}:${tag_name}"
+            fi
+          done
           echo "tags=$tags" >> "$GITHUB_OUTPUT"
           echo "revision=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "Tags: $tags"
