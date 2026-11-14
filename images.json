@@ -1,0 +1,20 @@
+[
+  {
+    "name": "threatfox",
+    "branch": "ThreatFox-Expanded",
+    "path": "external-import/threatfox",
+    "pr": 7404
+  },
+  {
+    "name": "censys-enrichment",
+    "branch": "Censys-enrichment-expanded",
+    "path": "internal-enrichment/censys-enrichment",
+    "pr": 7402
+  },
+  {
+    "name": "google-ti-feeds",
+    "branch": "google-ti-feeds-enhanced-features",
+    "path": "external-import/google-ti-feeds",
+    "pr": null
+  }
+]

@@ -1,0 +1,125 @@
+name: Build connector images
+
+# Builds the connectors listed in images.json from their branches on the
+# connectors fork and pushes them to ghcr.io/<owner>/connector-<name>.
+#
+# Tags per image: the branch name, sha-<commit>, and pr-<number> when the
+# entry has an upstream pull request.
+
+on:
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "Build only this image name from images.json (empty: all)"
+        required: false
+        default: ""
+      pycti_version:
+        description: "Pin pycti to this version, to match the OpenCTI platform (empty: keep the branch pin)"
+        required: false
+        default: ""
+  push:
+    branches: [main]
+    paths: [images.json, .github/workflows/build-images.yml]
+
+env:
+  SOURCE_REPOSITORY: FIying-Scotsman/connectors
+
+permissions:
+  contents: read
+
+jobs:
+  matrix:
+    name: Select images
+    runs-on: ubuntu-latest
+    outputs:
+      images: ${{ steps.select.outputs.images }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Select images
+        id: select
+        env:
+          ONLY: ${{ inputs.only }}
+        run: |
+          images=$(jq -c --arg only "$ONLY" '[.[] | select($only == "" or .name == $only)]' images.json)
+          if [ "$images" = "[]" ]; then
+            echo "::error::No image named '$ONLY' in images.json"
+            exit 1
+          fi
+          echo "images=$images" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.name }}
+    needs: matrix
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.matrix.outputs.images) }}
+    steps:
+      - name: Check out ${{ matrix.branch }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ env.SOURCE_REPOSITORY }}
+          ref: ${{ matrix.branch }}
+          sparse-checkout: ${{ matrix.path }}
+
+      - name: Pin pycti
+        if: inputs.pycti_version != ''
+        working-directory: ${{ matrix.path }}
+        env:
+          PYCTI_VERSION: ${{ inputs.pycti_version }}
+        run: |
+          find . \( -name pyproject.toml -o -name requirements.txt \) \
+            -exec sed -i -E "s/pycti==[0-9][0-9.]*/pycti==${PYCTI_VERSION}/" {} +
+          grep -rn "pycti==" --include=pyproject.toml --include=requirements.txt .
+
+      - name: Compute tags
+        id: tags
+        env:
+          NAME: ${{ matrix.name }}
+          BRANCH: ${{ matrix.branch }}
+          PR: ${{ matrix.pr }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          image="ghcr.io/${OWNER,,}/connector-${NAME}"
+          branch_tag=$(printf '%s' "${BRANCH,,}" | tr -c 'a-z0-9._-' '-')
+          tags="${image}:${branch_tag},${image}:sha-$(git rev-parse --short=7 HEAD)"
+          if [ -n "$PR" ]; then
+            tags="${tags},${image}:pr-${PR}"
+          fi
+          echo "tags=$tags" >> "$GITHUB_OUTPUT"
+          echo "revision=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "Tags: $tags"
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        working-directory: ${{ matrix.path }}
+        env:
+          TAGS: ${{ steps.tags.outputs.tags }}
+          REVISION: ${{ steps.tags.outputs.revision }}
+          BRANCH: ${{ matrix.branch }}
+        run: |
+          tag_args=()
+          IFS=',' read -ra tags <<< "$TAGS"
+          for tag in "${tags[@]}"; do
+            tag_args+=(--tag "$tag")
+          done
+          docker buildx build . \
+            --platform linux/amd64 \
+            "${tag_args[@]}" \
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.url=https://github.com/${SOURCE_REPOSITORY}/tree/${BRANCH}/${{ matrix.path }}" \
+            --label "org.opencontainers.image.revision=${REVISION}" \
+            --label "org.opencontainers.image.description=OpenCTI ${{ matrix.name }} connector, unmerged branch ${BRANCH}" \
+            --push
