@@ -1,0 +1,117 @@
+name: Clean up old images
+
+# Deletes old versions of the images listed in images.json. Kept:
+# - every version a pr- or branch tag points to (the current builds),
+# - the KEEP_BUILDS newest versions tagged only sha-..., for rollback,
+# - every manifest one of those versions references (platform images and
+#   attestations: GitHub lists them as untagged versions, but the tagged image
+#   breaks without them).
+# Everything else, untagged versions included, is deleted.
+#
+# An image whose upstream pull request was merged more than RETIRE_DAYS ago is
+# deleted entirely: the official image replaces it.
+
+on:
+  schedule:
+    - cron: "0 4 * * 1" # Mondays 04:00 UTC
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Only list what would be deleted"
+        type: boolean
+        default: true
+  push:
+    branches: [main]
+    paths: [.github/workflows/cleanup-images.yml]
+
+env:
+  KEEP_BUILDS: 5
+  RETIRE_DAYS: 30
+  UPSTREAM_REPOSITORY: OpenCTI-Platform/connectors
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  cleanup:
+    name: Clean up
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Delete old versions
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+          # A push only checks the workflow: it never deletes.
+          DRY_RUN: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
+        run: |
+          set -euo pipefail
+          owner="${OWNER,,}"
+          accept="application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json"
+
+          for name in $(jq -r '.[].name' images.json); do
+            package="connector-${name}"
+            if ! versions=$(gh api --paginate "/users/${owner}/packages/container/${package}/versions" 2> /dev/null | jq -s 'add // []'); then
+              versions=""
+            fi
+
+            # Merged upstream: the official image takes over. The whole package goes
+            # RETIRE_DAYS after the merge, leaving time to switch deployments. The
+            # entry stays in images.json: the build skips it, and pointing its pr to a
+            # new pull request builds it again.
+            pr=$(jq -r --arg name "$name" '.[] | select(.name == $name) | .pr // empty' images.json)
+            merged=""
+            if [ -n "$pr" ]; then
+              merged=$(gh api "repos/${UPSTREAM_REPOSITORY}/pulls/${pr}" --jq '.merged_at // empty')
+            fi
+            if [ -n "$merged" ]; then
+              retire_on=$(date -u -d "${merged%T*} + ${RETIRE_DAYS} days" +%F)
+              if [ -z "$versions" ]; then
+                echo "${package}: PR #${pr} merged, package already deleted"
+              elif [ "$(date -u +%F)" \< "$retire_on" ]; then
+                echo "::notice::${package}: PR #${pr} merged on ${merged%T*}, package deleted from ${retire_on}"
+              elif [ "$DRY_RUN" = "true" ]; then
+                echo "::notice::${package}: PR #${pr} merged on ${merged%T*}, would delete the package"
+              else
+                gh api --silent -X DELETE "/users/${owner}/packages/container/${package}"
+                echo "::notice::${package}: PR #${pr} merged on ${merged%T*}, package deleted"
+              fi
+              continue
+            fi
+
+            if [ -z "$versions" ]; then
+              echo "::warning::${package}: package not found, skipped"
+              continue
+            fi
+
+            # Current builds, then the newest sha-only builds.
+            current=$(jq -c '[.[] | select(any(.metadata.container.tags[]; startswith("sha-") | not))]' <<< "$versions")
+            builds=$(jq -c '[.[] | select((.metadata.container.tags | length) > 0 and all(.metadata.container.tags[]; startswith("sha-")))] | sort_by(.created_at) | reverse' <<< "$versions")
+            kept=$(jq -c --argjson current "$current" --argjson n "$KEEP_BUILDS" '$current + .[:$n]' <<< "$builds")
+
+            # Manifests referenced by the kept versions.
+            token=$(curl -fsS "https://ghcr.io/token?scope=repository:${owner}/${package}:pull" | jq -r .token)
+            protected=$(jq -r '.[].name' <<< "$kept")
+            for digest in $(jq -r '.[].name' <<< "$kept"); do
+              children=$(curl -fsS -H "Authorization: Bearer ${token}" -H "Accept: ${accept}" \
+                "https://ghcr.io/v2/${owner}/${package}/manifests/${digest}" | jq -r '.manifests[]?.digest')
+              protected="${protected}"$'\n'"${children}"
+            done
+            protected_json=$(grep -v '^$' <<< "$protected" | jq -R . | jq -s .)
+
+            deletions=$(jq -c --argjson keep "$protected_json" '[.[] | select(.name as $d | $keep | index($d) | not)]' <<< "$versions")
+            echo "${package}: $(jq length <<< "$versions") versions, $(jq length <<< "$protected_json") kept, $(jq length <<< "$deletions") to delete"
+
+            jq -c '.[]' <<< "$deletions" | while read -r version; do
+              id=$(jq -r .id <<< "$version")
+              label=$(jq -r '"\(.name[7:19]) \(.created_at) tags: \(.metadata.container.tags | join(", ") | if . == "" then "none" else . end)"' <<< "$version")
+              if [ "$DRY_RUN" = "true" ]; then
+                echo "::notice::${package}: would delete ${label}"
+              else
+                gh api --silent -X DELETE "/users/${owner}/packages/container/${package}/versions/${id}"
+                echo "::notice::${package}: deleted ${label}"
+              fi
+            done
+          done

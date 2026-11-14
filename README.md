@@ -102,3 +102,47 @@ workflow then:
 
 A branch written against a newer `connectors-sdk` than that release may not build or
 run with it: check the connector on the target platform before handing it over.
+
+## Cleanup
+
+GitHub never deletes images by itself, and every rebuild leaves the previous build
+behind. The **Clean up old images** workflow runs every Monday at 04:00 UTC and, for
+each image in `images.json`, keeps:
+
+- the current builds: every version a `pr-` or branch tag points to, including
+  `-pycti-<version>` builds of a specific OpenCTI version;
+- the 5 newest older builds (versions only tagged `sha-...`), for rollback. Change
+  `KEEP_BUILDS` in the workflow to keep more or fewer;
+- the manifests those versions reference. GitHub lists them as untagged versions, but
+  the tagged image breaks without them.
+
+Everything else, including untagged versions, is deleted. A deployment pinned to a
+`sha-` tag older than the 5 newest builds stops pulling, so hand over a newer build
+before it falls out.
+
+To preview, run the workflow by hand with `dry_run` ticked (the default): the run
+summary lists what it would delete. Untick it to delete now instead of waiting for
+Monday.
+
+## When a pull request is merged
+
+The official OpenCTI image then replaces this one. Both workflows check the `pr` of
+each entry upstream:
+
+- **From the merge:** the image is not built any more. Existing tags keep working, so
+  the vendor can switch to the official image (`opencti/connector-<name>`) at their
+  own pace.
+- **30 days after the merge:** the cleanup deletes the whole package. Change
+  `RETIRE_DAYS` in the cleanup workflow for a longer or shorter grace period. GitHub
+  keeps a deleted package restorable for 30 days, from the package settings of your
+  profile.
+- **The entry stays in `images.json`.** Leave it there: it is skipped, so changing
+  `images.json` to add another image does not rebuild it.
+
+To ship a fix on top of the merged code, open a new upstream pull request, then set
+the entry's `pr` to the new number (and `branch` if it changed). The image builds
+again, under a new `pr-<number>` tag, and its package is recreated if the cleanup had
+deleted it. That merge retires it again the same way.
+
+An entry without `pr` is never retired automatically: remove it from `images.json`
+and delete its package by hand from the package settings.

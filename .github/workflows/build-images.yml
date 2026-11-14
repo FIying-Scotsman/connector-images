@@ -23,6 +23,7 @@ on:
 
 env:
   SOURCE_REPOSITORY: FIying-Scotsman/connectors
+  UPSTREAM_REPOSITORY: OpenCTI-Platform/connectors
 
 permissions:
   contents: read
@@ -36,21 +37,40 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # Images whose upstream pull request is merged are not built any more: the
+      # official image takes over, and the cleanup workflow deletes them later. The
+      # entry stays in images.json; a new pr number builds it again.
       - name: Select images
         id: select
         env:
           ONLY: ${{ inputs.only }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          images=$(jq -c --arg only "$ONLY" '[.[] | select($only == "" or .name == $only)]' images.json)
-          if [ "$images" = "[]" ]; then
+          set -euo pipefail
+          selected=$(jq -c --arg only "$ONLY" '[.[] | select($only == "" or .name == $only)]' images.json)
+          if [ "$selected" = "[]" ]; then
             echo "::error::No image named '$ONLY' in images.json"
             exit 1
           fi
+          images="[]"
+          while read -r entry; do
+            name=$(jq -r .name <<< "$entry")
+            pr=$(jq -r '.pr // empty' <<< "$entry")
+            if [ -n "$pr" ]; then
+              merged=$(gh api "repos/${UPSTREAM_REPOSITORY}/pulls/${pr}" --jq '.merged_at // empty')
+              if [ -n "$merged" ]; then
+                echo "::notice::${name}: PR #${pr} merged on ${merged%T*}, not built. Set its pr to a new pull request to build it again."
+                continue
+              fi
+            fi
+            images=$(jq -c --argjson entry "$entry" '. + [$entry]' <<< "$images")
+          done < <(jq -c '.[]' <<< "$selected")
           echo "images=$images" >> "$GITHUB_OUTPUT"
 
   build:
     name: Build ${{ matrix.name }}
     needs: matrix
+    if: needs.matrix.outputs.images != '[]'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -154,6 +174,7 @@ jobs:
           done
           docker buildx build . \
             --platform linux/amd64 \
+            --provenance=false \
             "${tag_args[@]}" \
             --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
             --label "org.opencontainers.image.url=https://github.com/${SOURCE_REPOSITORY}/tree/${BRANCH}/${{ matrix.path }}" \
