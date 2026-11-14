@@ -8,21 +8,34 @@ These are pre-release builds of open pull requests, not official OpenCTI images.
 
 ## Images
 
-| Image | Branch | Upstream PR |
-|---|---|---|
-| `ghcr.io/fiying-scotsman/connector-threatfox` | `ThreatFox-Expanded` | [#7404](https://github.com/OpenCTI-Platform/connectors/pull/7404) |
-| `ghcr.io/fiying-scotsman/connector-censys-enrichment` | `Censys-enrichment-expanded` | [#7402](https://github.com/OpenCTI-Platform/connectors/pull/7402) |
-| `ghcr.io/fiying-scotsman/connector-google-ti-feeds` | `google-ti-feeds-enhanced-features` | not opened yet |
-
-Tags:
-
-- `pr-<number>`: latest build of the pull request
-- `<branch>` (lower case): latest build of the branch
-- `sha-<commit>`: one exact build, for pinning a deployment
+Pull the latest build of each connector with:
 
 ```bash
 docker pull ghcr.io/fiying-scotsman/connector-threatfox:pr-7404
+docker pull ghcr.io/fiying-scotsman/connector-censys-enrichment:pr-7402
+docker pull ghcr.io/fiying-scotsman/connector-google-ti-feeds:google-ti-feeds-enhanced-features
 ```
+
+| Connector | Branch | Upstream PR | Tags |
+|---|---|---|---|
+| threatfox | `ThreatFox-Expanded` | [#7404](https://github.com/OpenCTI-Platform/connectors/pull/7404) | [list](https://github.com/FIying-Scotsman/connector-images/pkgs/container/connector-threatfox/versions) |
+| censys-enrichment | `Censys-enrichment-expanded` | [#7402](https://github.com/OpenCTI-Platform/connectors/pull/7402) | [list](https://github.com/FIying-Scotsman/connector-images/pkgs/container/connector-censys-enrichment/versions) |
+| google-ti-feeds | `google-ti-feeds-enhanced-features` | not opened yet | [list](https://github.com/FIying-Scotsman/connector-images/pkgs/container/connector-google-ti-feeds/versions) |
+
+### Tags
+
+Every build is pushed with these tags:
+
+| Tag | Example | Points to |
+|---|---|---|
+| `pr-<number>` | `pr-7404` | Latest build of the pull request. Only when the image has an upstream PR. |
+| `<branch>` (lower case) | `threatfox-expanded` | Latest build of the branch. Always present. |
+| `sha-<commit>` | `sha-5133767` | One exact build, never moves. Use it to pin a deployment. |
+
+There is no `latest` tag. The `pr-` and branch tags move to each new build; a `sha-`
+tag stays on the build it was made for. The **list** links above show every tag of an
+image with its build date. From a terminal, `skopeo list-tags docker://<image>` or
+`crane ls <image>` lists them too.
 
 Configuration is the same as the upstream connector: see the README of the connector
 on its branch.

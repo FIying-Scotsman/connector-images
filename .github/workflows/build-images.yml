@@ -14,7 +14,7 @@ on:
         required: false
         default: ""
       pycti_version:
-        description: "Pin pycti to this version, to match the OpenCTI platform (empty: keep the branch pin)"
+        description: "Pin pycti to this version, to match the OpenCTI platform (empty: the connectors-sdk master pin)"
         required: false
         default: ""
   push:
@@ -67,12 +67,22 @@ jobs:
           ref: ${{ matrix.branch }}
           sparse-checkout: ${{ matrix.path }}
 
+      # The branches install connectors-sdk from upstream master, which pins an exact
+      # pycti version: an older pin on the branch cannot be installed alongside it.
       - name: Pin pycti
-        if: inputs.pycti_version != ''
         working-directory: ${{ matrix.path }}
         env:
           PYCTI_VERSION: ${{ inputs.pycti_version }}
         run: |
+          if [ -z "$PYCTI_VERSION" ]; then
+            PYCTI_VERSION=$(curl -fsSL https://raw.githubusercontent.com/OpenCTI-Platform/connectors/master/connectors-sdk/pyproject.toml \
+              | sed -nE 's/.*"pycti==([0-9.]+)".*/\1/p' | head -1)
+            echo "pycti pin of connectors-sdk master: ${PYCTI_VERSION}"
+          fi
+          if [ -z "$PYCTI_VERSION" ]; then
+            echo "::error::No pycti version to pin"
+            exit 1
+          fi
           find . \( -name pyproject.toml -o -name requirements.txt \) \
             -exec sed -i -E "s/pycti==[0-9][0-9.]*/pycti==${PYCTI_VERSION}/" {} +
           grep -rn "pycti==" --include=pyproject.toml --include=requirements.txt .
