@@ -16,5 +16,11 @@
     "branch": "google-ti-feeds-enhanced-features",
     "path": "external-import/google-ti-feeds",
     "pr": null
+  },
+  {
+    "name": "abuseipdb",
+    "branch": "master",
+    "path": "internal-enrichment/abuseipdb",
+    "pr": null
   }
 ]
