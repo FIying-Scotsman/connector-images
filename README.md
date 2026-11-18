@@ -14,6 +14,7 @@ Pull the latest build of each connector with:
 docker pull ghcr.io/fiying-scotsman/connector-threatfox:pr-7404
 docker pull ghcr.io/fiying-scotsman/connector-censys-enrichment:pr-7402
 docker pull ghcr.io/fiying-scotsman/connector-google-ti-feeds:google-ti-feeds-enhanced-features
+docker pull ghcr.io/fiying-scotsman/connector-csis:csis
 ```
 
 Public images pull without logging in. A private image needs read access to its
@@ -32,6 +33,7 @@ never be made private again: to hide one, delete its package and rebuild it.
 | threatfox | `ThreatFox-Expanded` | [#7404](https://github.com/OpenCTI-Platform/connectors/pull/7404) | [list](https://github.com/FIying-Scotsman/connector-images/pkgs/container/connector-threatfox/versions) |
 | censys-enrichment | `Censys-enrichment-expanded` | [#7402](https://github.com/OpenCTI-Platform/connectors/pull/7402) | [list](https://github.com/FIying-Scotsman/connector-images/pkgs/container/connector-censys-enrichment/versions) |
 | google-ti-feeds | `google-ti-feeds-enhanced-features` | not opened yet | [list](https://github.com/FIying-Scotsman/connector-images/pkgs/container/connector-google-ti-feeds/versions) |
+| csis | `csis` | not opened yet | [list](https://github.com/FIying-Scotsman/connector-images/pkgs/container/connector-csis/versions) |
 
 ### Tags
 
